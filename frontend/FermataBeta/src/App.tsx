@@ -4,6 +4,7 @@
 // THIS IS THE HOME PAGE OF FermataBeta
 import { useState, useRef, useEffect } from 'react'
 import Navbar from './components/Navbar'
+import { jsPDF } from "jspdf";
 
 function App() {
   // State to store the loaded image object
@@ -18,6 +19,7 @@ function App() {
   // State for beta generation
   const [loading, setLoading] = useState(false)
   const [slides, setSlides] = useState<string[]>([])
+  const [currentSlide, setCurrentSlide] = useState(0);
   
   // Reference to the canvas element so we can draw on it
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -54,8 +56,10 @@ function App() {
     // Reset holds and slides when new image is uploaded
     setHolds([]);
     setSlides([]);
+    setCurrentSlide(0);
     setImage(null); // Clear previous image
     setOriginalDataUrl(null); // Clear previous data URL
+    
 
     // Create a new Image object
     const img = new Image();
@@ -167,6 +171,7 @@ function App() {
       const result = await response.json();
       // Assume result has shape: { images: [ "data:image/png;base64,...", ... ] }
       setSlides(result.images || []);
+      setCurrentSlide(0);
     } catch (err) {
       console.error("Error generating beta:", err);
       alert("Failed to generate beta. Please try again.");
@@ -174,6 +179,26 @@ function App() {
       setLoading(false);
     }
   }
+
+  const handleDownloadPDF = () => {
+    if (slides.length === 0 || !image) return;
+
+    const pdf = new jsPDF({
+      orientation: image.width > image.height ? "landscape" : "portrait",
+      unit: "px",
+      format: [image.width, image.height],
+    });
+
+    slides.forEach((imgData, idx) => {
+      if (idx !== 0) pdf.addPage();
+      pdf.addImage(imgData, "PNG", 0, 0, image.width, image.height);
+    });
+
+    pdf.save("boulder-beta.pdf");
+  };
+
+
+  
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -274,23 +299,48 @@ function App() {
             )}
           </div>
 
-          {/* Beta Slides section */}
+          {/* Beta Slideshow section */}
           {slides.length > 0 && (
-            <div className="bg-white rounded-lg shadow-lg p-6 mt-8">
-              <h2 className="text-xl font-semibold text-gray-900 mb-4">Generated Beta Slides</h2>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {slides.map((slide, index) => (
-                  <div key={index} className="border border-gray-200 rounded-lg overflow-hidden">
-                    <img 
-                      src={slide} 
-                      alt={`Beta slide ${index + 1}`}
-                      className="w-full h-auto"
-                    />
-                    <div className="p-2 bg-gray-50 text-center">
-                      <span className="text-sm text-gray-600">Step {index + 1}</span>
-                    </div>
-                  </div>
-                ))}
+            <div className="bg-white rounded-lg shadow-lg p-6 mt-8 text-center">
+              <h2 className="text-xl font-semibold text-gray-900 mb-4">
+                Generated Beta Slideshow
+              </h2>
+
+              <img
+                src={slides[currentSlide]}
+                alt={`Slide ${currentSlide + 1}`}
+                style={{ maxWidth: "100%", display: "block", margin: "0 auto 20px" }}
+              />
+
+              <div className="flex flex-wrap justify-center items-center gap-2">
+                <button
+                  onClick={() => setCurrentSlide(i => Math.max(i - 1, 0))}
+                  disabled={currentSlide === 0}
+                  className="px-4 py-2 bg-gray-200 rounded disabled:opacity-50"
+                >
+                  ◀ Prev
+                </button>
+
+                <span className="text-sm mx-2">
+                  Slide {currentSlide + 1} of {slides.length}
+                </span>
+
+                <button
+                  onClick={() =>
+                    setCurrentSlide(i => Math.min(i + 1, slides.length - 1))
+                  }
+                  disabled={currentSlide === slides.length - 1}
+                  className="px-4 py-2 bg-gray-200 rounded disabled:opacity-50"
+                >
+                  Next ▶
+                </button>
+
+                <button
+                  onClick={handleDownloadPDF}
+                  className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+                >
+                  Download PDF
+                </button>
               </div>
             </div>
           )}
