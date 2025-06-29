@@ -4,13 +4,15 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "concurrently \"npm run start-backend\" \"vite\"",
+    "start-backend": "node ../../backend/index.js",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.1.10",
+    "concurrently": "^9.2.0",
     "jspdf": "^3.0.1",
     "react": "^19.1.0",
     "react-dom": "^19.1.0"
