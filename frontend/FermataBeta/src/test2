@@ -3,6 +3,7 @@ import numpy as np
 from ultralytics import YOLO
 import os
 from pathlib import Path
+import json
 
 class CustomHoldDetector:
     def __init__(self):
@@ -36,23 +37,25 @@ class CustomHoldDetector:
                     # Get bounding box coordinates
                     x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
                     confidence = box.conf[0].cpu().numpy()
-                    class_id = int(box.cls[0].cpu().numpy())
+                    id = int(box.cls[0].cpu().numpy())
                     
                     # Calculate center and size
-                    center_x = int((x1 + x2) / 2)
-                    center_y = int((y1 + y2) / 2)
+                    xNorm = int((x1 + x2) / 2)
+                    yNorm = int((y1 + y2) / 2)
                     width = int(x2 - x1)
                     height = int(y2 - y1)
                     
                     # Get class name
-                    class_name = self.model.names[class_id]
+                    type = self.model.names[id]
                     
                     holds.append({
-                        'center_px': (center_x, center_y),
+                        'id': id,
+                        'type': type,
+                        'center_px': (xNorm, yNorm),
                         'confidence': float(confidence),
                         'bbox': (int(x1), int(y1), width, height),
-                        'class_name': class_name,
-                        'class_id': class_id
+                        
+                        
                     })
         
         return results[0].orig_img, holds
@@ -66,23 +69,25 @@ class CustomHoldDetector:
         }
         
         for i, hold in enumerate(holds):
-            center_x, center_y = hold['center_px']
+            id = hold['id']
+            type = hold['type']
+            
+            xNorm, yNorm = hold['center_px']
             confidence = hold['confidence']
-            class_name = hold['class_name']
-            class_id = hold['class_id']
+            
             x, y, w, h = hold['bbox']
             
             # Choose color based on class
-            color = colors.get(class_id, (255, 255, 255))
+            color = colors.get(id, (255, 255, 255))
             
             # Draw bounding box
             cv2.rectangle(image, (x, y), (x + w, y + h), color, 2)
             
             # Draw center point
-            cv2.circle(image, (center_x, center_y), 5, color, -1)
+            cv2.circle(image, (xNorm, yNorm), 5, color, -1)
             
             # Draw label
-            label = f"{class_name} {confidence:.2f}"
+            label = f"{type} {confidence:.2f}"
             label_size = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 2)[0]
             
             # Background for text
@@ -94,7 +99,7 @@ class CustomHoldDetector:
                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
             
             # Number the holds
-            cv2.putText(image, str(i + 1), (center_x - 10, center_y + 5),
+            cv2.putText(image, str(i + 1), (xNorm - 10, yNorm + 5),
                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
         
         return image
@@ -117,13 +122,13 @@ class CustomHoldDetector:
         
         class_counts = {}
         for hold in holds:
-            class_name = hold['class_name']
-            class_counts[class_name] = class_counts.get(class_name, 0) + 1
-            print(f"   {hold['class_name']}: confidence {hold['confidence']:.3f}")
+            type = hold['type']
+            class_counts[type] = class_counts.get(type, 0) + 1
+            print(f"   {hold['type']}: confidence {hold['confidence']:.3f}")
         
         print(f"\n📊 Summary:")
-        for class_name, count in class_counts.items():
-            print(f"   {class_name}: {count} detected")
+        for type, count in class_counts.items():
+            print(f"   {type}: {count} detected")
         
         # Save result
         if save_result:
@@ -148,7 +153,24 @@ def main():
         if os.path.exists(image_path):
             print(f"\n{'='*50}")
             result_image, holds = detector.process_image(image_path)
-            
+
+            # --- Save holds data as JSON ---
+            # Convert tuples to lists for JSON compatibility
+            holds_json = []
+            for hold in holds:
+                hold_copy = hold.copy()
+                if isinstance(hold_copy['center_px'], tuple):
+                    hold_copy['center_px'] = list(hold_copy['center_px'])
+                if isinstance(hold_copy['bbox'], tuple):
+                    hold_copy['bbox'] = list(hold_copy['bbox'])
+                holds_json.append(hold_copy)
+            # Write to file (one file per image)
+            json_filename = os.path.splitext(os.path.basename(image_path))[0] + "_holds.json"
+            with open(json_filename, "w") as f:
+                json.dump(holds_json, f, indent=2)
+            print(f"💾 Holds data saved to {json_filename}")
+            # --- End JSON save ---
+
             if result_image is not None:
                 # Display result
                 cv2.imshow('Custom Hold Detection', result_image)
@@ -157,8 +179,6 @@ def main():
                 cv2.destroyAllWindows()
         else:
             print(f"⚠️  Image not found: {image_path}")
-    
-    print("\n🎉 Detection complete!")
 
 if __name__ == "__main__":
     main()
