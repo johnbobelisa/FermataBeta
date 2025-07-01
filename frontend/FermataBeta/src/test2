@@ -138,6 +138,22 @@ class CustomHoldDetector:
         
         return result_image, holds
 
+
+def is_hold_color(image, bbox, target_color='red'):
+    # Define HSV ranges for your target color
+    color_ranges = {
+        'red': ([0, 100, 100], [10, 255, 255]),
+        'yellow': ([20, 100, 100], [30, 255, 255]),
+        # Add more as needed
+    }
+    lower, upper = color_ranges[target_color]
+    x, y, w, h = bbox
+    crop = image[y:y+h, x:x+w]
+    hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
+    mask = cv2.inRange(hsv, np.array(lower), np.array(upper))
+    return np.count_nonzero(mask) > 0.2 * mask.size  # At least 20% pixels match
+
+
 def main():
     """Test the custom detector"""
     detector = CustomHoldDetector()
