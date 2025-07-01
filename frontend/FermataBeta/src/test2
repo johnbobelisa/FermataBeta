@@ -26,8 +26,14 @@ class CustomHoldDetector:
             print(f"❌ Image not found: {image_path}")
             return None, []
         
+        # Load and resize image before detection
+        image = cv2.imread(image_path)
+        target_size = (640, 640)
+        image = cv2.resize(image, target_size)
+
         # Run inference
-        results = self.model(image_path, conf=confidence_threshold)
+        results = self.model(image, conf=confidence_threshold)
+
         
         holds = []
         for result in results:
@@ -58,7 +64,7 @@ class CustomHoldDetector:
                         
                     })
         
-        return results[0].orig_img, holds
+        return results[0].orig_img, holds    
     
     def draw_detections(self, image, holds):
         """Draw detected holds on the image"""
@@ -69,38 +75,39 @@ class CustomHoldDetector:
         }
         
         for i, hold in enumerate(holds):
-            id = hold['id']
-            type = hold['type']
-            
-            xNorm, yNorm = hold['center_px']
-            confidence = hold['confidence']
-            
-            x, y, w, h = hold['bbox']
-            
-            # Choose color based on class
-            color = colors.get(id, (255, 255, 255))
-            
-            # Draw bounding box
-            cv2.rectangle(image, (x, y), (x + w, y + h), color, 2)
-            
-            # Draw center point
-            cv2.circle(image, (xNorm, yNorm), 5, color, -1)
-            
-            # Draw label
-            label = f"{type} {confidence:.2f}"
-            label_size = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 2)[0]
-            
-            # Background for text
-            cv2.rectangle(image, (x, y - label_size[1] - 10), 
-                         (x + label_size[0], y), color, -1)
-            
-            # Text
-            cv2.putText(image, label, (x, y - 5),
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
-            
-            # Number the holds
-            cv2.putText(image, str(i + 1), (xNorm - 10, yNorm + 5),
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+            if is_hold_color(image, hold['bbox'], target_color='green'):
+                id = hold['id']
+                type = hold['type']
+                
+                xNorm, yNorm = hold['center_px']
+                confidence = hold['confidence']
+                
+                x, y, w, h = hold['bbox']
+                
+                # Choose color based on class
+                color = colors.get(id, (255, 255, 255))
+                
+                # Draw bounding box
+                cv2.rectangle(image, (x, y), (x + w, y + h), color, 2)
+                
+                # Draw center point
+                cv2.circle(image, (xNorm, yNorm), 5, color, -1)
+                
+                # Draw label
+                label = f"{type} {confidence:.2f}"
+                label_size = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 2)[0]
+                
+                # Background for text
+                cv2.rectangle(image, (x, y - label_size[1] - 10), 
+                            (x + label_size[0], y), color, -1)
+                
+                # Text
+                cv2.putText(image, label, (x, y - 5),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
+                
+                # Number the holds
+                cv2.putText(image, str(i + 1), (xNorm - 10, yNorm + 5),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
         
         return image
     
@@ -110,6 +117,9 @@ class CustomHoldDetector:
         
         # Detect holds
         original_image, holds = self.detect_holds(image_path)
+        
+        target_size = (640, 640)  # width, height
+        original_image = cv2.resize(original_image, target_size)
         
         if original_image is None:
             return None
@@ -139,19 +149,21 @@ class CustomHoldDetector:
         return result_image, holds
 
 
-def is_hold_color(image, bbox, target_color='red'):
+def is_hold_color(image, bbox, target_color):
     # Define HSV ranges for your target color
     color_ranges = {
         'red': ([0, 100, 100], [10, 255, 255]),
         'yellow': ([20, 100, 100], [30, 255, 255]),
-        # Add more as needed
+        'green': ([40, 40, 40], [70, 255, 255]),  # Add this line
+
+            # Add more as needed
     }
     lower, upper = color_ranges[target_color]
     x, y, w, h = bbox
     crop = image[y:y+h, x:x+w]
     hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
     mask = cv2.inRange(hsv, np.array(lower), np.array(upper))
-    return np.count_nonzero(mask) > 0.2 * mask.size  # At least 20% pixels match
+    return np.count_nonzero(mask) > 0.1 * mask.size  # At least 20% pixels match
 
 
 def main():
@@ -162,7 +174,7 @@ def main():
     test_images = [
         "frontend/FermataBeta/src/images/2.jpg",  # Your test image
         "frontend/FermataBeta/src/images/images.jpeg",  # Another test image
-        # Add more image paths here
+        "frontend/FermataBeta/src/images/image.jpg",
     ]
     
     for image_path in test_images:
@@ -173,17 +185,22 @@ def main():
             # --- Save holds data as JSON ---
             # Convert tuples to lists for JSON compatibility
             holds_json = []
+            filtered_holds = []
+
             for hold in holds:
-                hold_copy = hold.copy()
-                if isinstance(hold_copy['center_px'], tuple):
-                    hold_copy['center_px'] = list(hold_copy['center_px'])
-                if isinstance(hold_copy['bbox'], tuple):
-                    hold_copy['bbox'] = list(hold_copy['bbox'])
-                holds_json.append(hold_copy)
+                if is_hold_color(result_image, hold['bbox'], target_color='green'):
+                    # Convert tuples to lists for JSON compatibility
+                    hold_copy = hold.copy()
+                    if isinstance(hold_copy['center_px'], tuple):
+                        hold_copy['center_px'] = list(hold_copy['center_px'])
+                    if isinstance(hold_copy['bbox'], tuple):
+                        hold_copy['bbox'] = list(hold_copy['bbox'])
+                    filtered_holds.append(hold_copy)
+
             # Write to file (one file per image)
             json_filename = os.path.splitext(os.path.basename(image_path))[0] + "_holds.json"
             with open(json_filename, "w") as f:
-                json.dump(holds_json, f, indent=2)
+                json.dump(filtered_holds, f, indent=2)
             print(f"💾 Holds data saved to {json_filename}")
             # --- End JSON save ---
 
