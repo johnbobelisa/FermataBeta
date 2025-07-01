@@ -1,0 +1,139 @@
+from ultralytics import YOLO
+import os
+from pathlib import Path
+
+class ClimbingHoldTrainer:
+    def __init__(self, model_name='yolov8n.pt'):
+        """Initialize trainer with YOLOv8 model"""
+        self.model = YOLO(model_name)
+        self.dataset_path = Path(__file__).parent / "Climbing Holds and Volumes.v14i.yolov8"
+        
+    def verify_dataset(self):
+        """Verify the dataset structure"""
+        required_files = [
+            "data.yaml",
+            "train/images",
+            "train/labels", 
+            "valid/images",
+            "valid/labels"
+        ]
+        
+        print("🔍 Verifying dataset structure...")
+        for file_path in required_files:
+            full_path = self.dataset_path / file_path
+            if full_path.exists():
+                if full_path.is_dir():
+                    count = len(list(full_path.glob("*")))
+                    print(f"✅ {file_path} - {count} files")
+                else:
+                    print(f"✅ {file_path} - exists")
+            else:
+                print(f"❌ {file_path} - missing")
+                return False
+        
+        return True
+    
+    def train(self, epochs=100, img_size=640, batch_size=16):
+        """Train the climbing hold detection model"""
+        
+        if not self.verify_dataset():
+            print("❌ Dataset verification failed!")
+            return None
+        
+        data_yaml_path = self.dataset_path / "data.yaml"
+        
+        print(f"🚀 Starting training with:")
+        print(f"   Dataset: {data_yaml_path}")
+        print(f"   Epochs: {epochs}")
+        print(f"   Image size: {img_size}")
+        print(f"   Batch size: {batch_size}")
+        
+        # Train the model
+        results = self.model.train(
+            data=str(data_yaml_path),
+            epochs=epochs,
+            imgsz=img_size,
+            batch=batch_size,
+            save=True,
+            save_period=10,  # Save checkpoint every 10 epochs
+            cache=True,      # Cache images for faster training
+            device='cpu',    # Use 'cuda' if you have GPU
+            workers=4,
+            name='climbing_holds_custom',
+            exist_ok=True,
+            patience=50,     # Early stopping patience
+            save_json=True   # Save training results as JSON
+        )
+        
+        print("✅ Training completed!")
+        print(f"📊 Best model saved at: runs/detect/climbing_holds_custom/weights/best.pt")
+        return results
+    
+    def validate(self):
+        """Validate the trained model"""
+        data_yaml_path = self.dataset_path / "data.yaml"
+        results = self.model.val(data=str(data_yaml_path))
+        return results
+    
+    def test_prediction(self, image_path=None):
+        """Test prediction on a sample image"""
+        if image_path is None:
+            # Use a test image from the dataset
+            test_images = list((self.dataset_path / "test/images").glob("*.jpg"))
+            if test_images:
+                image_path = test_images[0]
+            else:
+                print("No test images found")
+                return
+        
+        print(f"🔍 Testing prediction on {image_path}")
+        results = self.model(str(image_path))
+        
+        # Save prediction results
+        for i, result in enumerate(results):
+            result.save(filename=f"test_prediction_{i}.jpg")
+            print(f"Prediction saved as: test_prediction_{i}.jpg")
+        
+        return results
+
+def main():
+    """Main training function"""
+    print("🧗 Climbing Hold Detection Model Training")
+    print("=" * 50)
+    
+    # Initialize trainer
+    trainer = ClimbingHoldTrainer('yolov8s.pt')  # Use small model for better accuracy
+    
+    # Verify dataset
+    if not trainer.verify_dataset():
+        print("Please check your dataset structure!")
+        return
+    
+    # Training parameters (adjust based on your system)
+    print("\n⚙️  Training Configuration:")
+    epochs = int(input("Enter number of epochs [default: 50]: ") or "50")
+    batch_size = int(input("Enter batch size [default: 8]: ") or "8")
+    
+    # Start training
+    results = trainer.train(
+        epochs=epochs,
+        batch_size=batch_size,
+        img_size=640
+    )
+    
+    if results:
+        # Validate the model
+        print("\n📊 Validating model...")
+        trainer.validate()
+        
+        # Test prediction
+        print("\n🧪 Testing prediction...")
+        trainer.test_prediction()
+        
+        print("\n🎉 Training complete! Your custom model is ready to use.")
+        print("Next steps:")
+        print("1. Check runs/detect/climbing_holds_custom/ for training results")
+        print("2. Use the best.pt model for inference")
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,164 @@
+import cv2
+import numpy as np
+from ultralytics import YOLO
+import os
+from pathlib import Path
+
+class CustomHoldDetector:
+    def __init__(self):
+        """Initialize with your trained custom model"""
+        # Path to your trained model
+        self.model_path = "C:/Users/Kueh Tze Shuen/Documents/GitHub/FermataBeta/runs/detect/climbing_holds_custom/weights/best.pt"
+        
+        # Load the model
+        try:
+            self.model = YOLO(self.model_path)
+            print(f"✅ Custom model loaded successfully!")
+            print(f"Model classes: {self.model.names}")
+        except Exception as e:
+            print(f"❌ Error loading model: {e}")
+            raise
+    
+    def detect_holds(self, image_path, confidence_threshold=0.5):
+        """Detect holds in an image"""
+        if not os.path.exists(image_path):
+            print(f"❌ Image not found: {image_path}")
+            return None, []
+        
+        # Run inference
+        results = self.model(image_path, conf=confidence_threshold)
+        
+        holds = []
+        for result in results:
+            boxes = result.boxes
+            if boxes is not None:
+                for box in boxes:
+                    # Get bounding box coordinates
+                    x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
+                    confidence = box.conf[0].cpu().numpy()
+                    class_id = int(box.cls[0].cpu().numpy())
+                    
+                    # Calculate center and size
+                    center_x = int((x1 + x2) / 2)
+                    center_y = int((y1 + y2) / 2)
+                    width = int(x2 - x1)
+                    height = int(y2 - y1)
+                    
+                    # Get class name
+                    class_name = self.model.names[class_id]
+                    
+                    holds.append({
+                        'center_px': (center_x, center_y),
+                        'confidence': float(confidence),
+                        'bbox': (int(x1), int(y1), width, height),
+                        'class_name': class_name,
+                        'class_id': class_id
+                    })
+        
+        return results[0].orig_img, holds
+    
+    def draw_detections(self, image, holds):
+        """Draw detected holds on the image"""
+        # Color mapping for different classes
+        colors = {
+            0: (0, 255, 0),    # Green for holds
+            1: (255, 0, 0),    # Blue for volumes
+        }
+        
+        for i, hold in enumerate(holds):
+            center_x, center_y = hold['center_px']
+            confidence = hold['confidence']
+            class_name = hold['class_name']
+            class_id = hold['class_id']
+            x, y, w, h = hold['bbox']
+            
+            # Choose color based on class
+            color = colors.get(class_id, (255, 255, 255))
+            
+            # Draw bounding box
+            cv2.rectangle(image, (x, y), (x + w, y + h), color, 2)
+            
+            # Draw center point
+            cv2.circle(image, (center_x, center_y), 5, color, -1)
+            
+            # Draw label
+            label = f"{class_name} {confidence:.2f}"
+            label_size = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 2)[0]
+            
+            # Background for text
+            cv2.rectangle(image, (x, y - label_size[1] - 10), 
+                         (x + label_size[0], y), color, -1)
+            
+            # Text
+            cv2.putText(image, label, (x, y - 5),
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
+            
+            # Number the holds
+            cv2.putText(image, str(i + 1), (center_x - 10, center_y + 5),
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+        
+        return image
+    
+    def process_image(self, image_path, save_result=True):
+        """Complete processing pipeline"""
+        print(f"🔍 Processing: {image_path}")
+        
+        # Detect holds
+        original_image, holds = self.detect_holds(image_path)
+        
+        if original_image is None:
+            return None
+        
+        # Draw results
+        result_image = self.draw_detections(original_image.copy(), holds)
+        
+        # Print results
+        print(f"✅ Found {len(holds)} objects:")
+        
+        class_counts = {}
+        for hold in holds:
+            class_name = hold['class_name']
+            class_counts[class_name] = class_counts.get(class_name, 0) + 1
+            print(f"   {hold['class_name']}: confidence {hold['confidence']:.3f}")
+        
+        print(f"\n📊 Summary:")
+        for class_name, count in class_counts.items():
+            print(f"   {class_name}: {count} detected")
+        
+        # Save result
+        if save_result:
+            output_path = image_path.replace('.jpg', '_detected.jpg').replace('.png', '_detected.png')
+            cv2.imwrite(output_path, result_image)
+            print(f"💾 Result saved: {output_path}")
+        
+        return result_image, holds
+
+def main():
+    """Test the custom detector"""
+    detector = CustomHoldDetector()
+    
+    # Test images
+    test_images = [
+        "frontend/FermataBeta/src/images/2.jpg",  # Your test image
+        "frontend/FermataBeta/src/images/images.jpeg",  # Another test image
+        # Add more image paths here
+    ]
+    
+    for image_path in test_images:
+        if os.path.exists(image_path):
+            print(f"\n{'='*50}")
+            result_image, holds = detector.process_image(image_path)
+            
+            if result_image is not None:
+                # Display result
+                cv2.imshow('Custom Hold Detection', result_image)
+                print("Press any key to continue to next image...")
+                cv2.waitKey(0)
+                cv2.destroyAllWindows()
+        else:
+            print(f"⚠️  Image not found: {image_path}")
+    
+    print("\n🎉 Detection complete!")
+
+if __name__ == "__main__":
+    main()
