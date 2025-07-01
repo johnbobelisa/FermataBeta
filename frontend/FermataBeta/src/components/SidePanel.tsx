@@ -1,4 +1,4 @@
-import type { ClimberState } from '../types';
+import type { ClimberState } from '../types/types';
 
 interface Props {
   selectedHold: number | null;

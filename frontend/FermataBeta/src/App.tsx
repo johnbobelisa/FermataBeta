@@ -1,17 +1,26 @@
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import Navbar from './components/Navbar';
 import ImageUploader from './components/ImageUploader';
 import CanvasArea from './components/CanvasArea';
 import SidePanel from './components/SidePanel';
 import { useHoldsManager } from './hooks/useHoldsManager';
 import { generateBetaPdf } from './utils/pdfGenerator';
-import type { BetaSequence } from './types';
+import type { BetaSequence } from './types/types';
 
 function App() {
   const [image, setImage] = useState<HTMLImageElement | null>(null);
   const [loading, setLoading] = useState(false);
   const [betaSequence, setBetaSequence] = useState<BetaSequence | null>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const HOLD_RADIUS_PX = 15;
+
+  useEffect(() => {
+    return () => {
+      if (image && image.src.startsWith('blob:')) {
+        URL.revokeObjectURL(image.src);
+      }
+    };
+  }, [image]);
 
   const {
     holds,
@@ -49,19 +58,17 @@ function App() {
     const canvas = canvasRef.current;
     const rect = canvas.getBoundingClientRect();
     
-    // Calculate click coordinates relative to the canvas's displayed size
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
 
-    // Normalize coordinates based on the element's size, not the canvas buffer size
     const xNorm = x / rect.width;
     const yNorm = y / rect.height;
 
-    // Find clicked hold based on normalized coordinates
     const clicked = holds.find(h => {
-        const hX = h.xNorm * rect.width;
-        const hY = h.yNorm * rect.height;
-        return Math.hypot(hX - x, hY - y) <= 15;
+      const hX = h.xNorm * rect.width;
+      const hY = h.yNorm * rect.height;
+      // Use the same constant radius for click detection
+      return Math.hypot(hX - x, hY - y) <= HOLD_RADIUS_PX;
     });
 
     if (clicked) {
@@ -71,41 +78,55 @@ function App() {
     }
   }, [holds, addHold, selectHold]);
 
-
   const canGenerateBeta = () => {
     const hasStart = Object.values(startState).some(limb => limb !== null);
     return holds.length > 0 && hasStart && finishHold !== null;
   };
 
   const handleGenerateBeta = async () => {
-    if (!image || !canGenerateBeta()) return alert('Please set up the problem correctly.');
+    if (!image || !canGenerateBeta()) {
+      alert('Please define the start and finish holds to generate a beta.');
+      return;
+    }
 
     setLoading(true);
+
+    // The route data structure should match what your Python backend expects.
     const problemData = {
-      // Sending raw image data can be huge. A reference or pre-upload might be better.
-      // For now, let's assume we send a smaller version if needed, or just the metadata.
-      wallImage: 'Image data placeholder', // Avoid sending large data URIs in every request
-      holds: holds.map(h => ({ id: h.id, coords: [h.xNorm, h.yNorm], type: h.type })),
-      startState,
-      finishHold
+      holds: holds.map(h => ({
+        id: h.id,
+        type: h.type,
+        xNorm: h.xNorm,
+        yNorm: h.yNorm
+      })),
+      start: startState,
+      finish: finishHold
     };
 
     try {
-      // Mocking the backend call
-      console.log("Sending to backend:", problemData);
-      await new Promise(resolve => setTimeout(resolve, 1500)); // Simulate network latency
-      
-      // MOCK RESPONSE
-      const mockBetaResult: BetaSequence = [
-          startState,
-          { ...startState, RH: finishHold }, // Simple mock: move right hand to finish
-      ];
+      // Replace 'http://localhost:5000/generate-beta' with your actual backend endpoint.
+      const response = await fetch('http://localhost:5000/generate-beta', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(problemData),
+      });
 
-      setBetaSequence(mockBetaResult);
-      alert('Beta generated successfully!');
+      if (!response.ok) {
+        // Handle HTTP errors like 404 or 500
+        const errorData = await response.json();
+        throw new Error(errorData.message || 'The server responded with an error.');
+      }
+
+      const result: BetaSequence = await response.json(); // The path from the A* search
+      setBetaSequence(result);
+      // You could remove the alert for a smoother UX
+      // alert('Beta generated successfully!');
+
     } catch (err) {
-      console.error(err);
-      alert('Failed to generate beta.');
+      console.error("Failed to generate beta:", err);
+      alert(err instanceof Error ? err.message : 'An unknown error occurred.');
     } finally {
       setLoading(false);
     }

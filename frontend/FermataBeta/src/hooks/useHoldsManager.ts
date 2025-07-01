@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback } from 'react';
-import type { Hold, HoldType, ClimberState } from '../types';
+import type { Hold, HoldType, ClimberState } from '../types/types';
 
 export function useHoldsManager() {
   const [holds, setHolds] = useState<Hold[]>([]);

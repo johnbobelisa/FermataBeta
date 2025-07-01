@@ -1,127 +1,118 @@
-import type { ClimberState, Hold } from '../types';
+// src/utils/skeleton.ts
 
-type Joint = { x: number; y: number };
-type LimbChain = Joint[];
+import type { Hold, ClimberState, JointPositions } from '../types/types';
 
-const LIMB_SEGMENT_LENGTHS = {
-  upperArm: 50,
-  forearm: 45,
-  thigh: 55,
-  shin: 50,
-};
-
-const TORSO_WIDTH = 40;
-const TORSO_HEIGHT = 60;
-
-// Simple FABRIK IK Solver
-const solveIK = (chain: LimbChain, target: Joint, iterations = 3): LimbChain => {
-  const segmentLengths = chain.slice(0, -1).map((p, i) => Math.hypot(chain[i+1].x - p.x, chain[i+1].y - p.y));
-  const totalLength = segmentLengths.reduce((a, b) => a + b, 0);
-  const distToTarget = Math.hypot(target.x - chain[0].x, target.y - chain[0].y);
-
-  if (distToTarget > totalLength) {
-    // Target is out of reach, stretch towards it
-    for (let i = 1; i < chain.length; i++) {
-      const ratio = segmentLengths[i-1] / totalLength;
-      chain[i] = {
-          x: chain[i-1].x + (target.x - chain[i-1].x) * ratio,
-          y: chain[i-1].y + (target.y - chain[i-1].y) * ratio,
-      }
-    }
-  } else {
-    // Target is reachable
-    const root = { ...chain[0] };
-    for (let iter = 0; iter < iterations; iter++) {
-      // Forward reaching
-      chain[chain.length - 1] = target;
-      for (let i = chain.length - 2; i >= 0; i--) {
-        const dist = Math.hypot(chain[i+1].x - chain[i].x, chain[i+1].y - chain[i].y);
-        const ratio = segmentLengths[i] / dist;
-        chain[i] = {
-            x: chain[i+1].x + (chain[i].x - chain[i+1].x) * ratio,
-            y: chain[i+1].y + (chain[i].y - chain[i+1].y) * ratio,
-        }
-      }
-      // Backward reaching
-      chain[0] = root;
-      for (let i = 1; i < chain.length; i++) {
-        const dist = Math.hypot(chain[i].x - chain[i-1].x, chain[i].y - chain[i-1].y);
-        const ratio = segmentLengths[i-1] / dist;
-        chain[i] = {
-            x: chain[i-1].x + (chain[i].x - chain[i-1].x) * ratio,
-            y: chain[i-1].y + (chain[i].y - chain[i-1].y) * ratio,
-        }
-      }
-    }
-  }
-  return chain;
-};
-
-const drawLimb = (ctx: CanvasRenderingContext2D, a: Joint, b: Joint) => {
-  ctx.beginPath();
-  ctx.moveTo(a.x, a.y);
-  ctx.lineTo(b.x, b.y);
-  ctx.stroke();
-};
-
-export const drawClimber = (
-  ctx: CanvasRenderingContext2D,
-  climberState: ClimberState,
+/**
+ * Calculates the 2D coordinates for a full skeletal model of the climber.
+ * This is the TypeScript version of the pose calculation logic.
+ */
+function calculateFullBodyPose(
+  state: ClimberState,
   holds: Hold[],
   canvasWidth: number,
   canvasHeight: number
-) => {
-  const findHoldCoords = (holdId: number | null): Joint | null => {
-    if (holdId === null) return null;
-    const hold = holds.find(h => h.id === holdId);
-    return hold ? { x: hold.xNorm * canvasWidth, y: hold.yNorm * canvasHeight } : null;
+): JointPositions {
+  const climberModel = {
+    torsoHeight: 0.30 * canvasHeight,
+    torsoWidth: 0.15 * canvasHeight,
+    upperArmLength: 0.25 * canvasHeight,
+    forearmLength: 0.25 * canvasHeight,
+    thighLength: 0.30 * canvasHeight,
+    shinLength: 0.25 * canvasHeight,
   };
 
-  const rhPos = findHoldCoords(climberState.RH);
-  const lhPos = findHoldCoords(climberState.LH);
-  const rfPos = findHoldCoords(climberState.RF);
-  const lfPos = findHoldCoords(climberState.LF);
+  const holdCoordsById: { [id: number]: { x: number; y: number } } = {};
+  holds.forEach(h => {
+    holdCoordsById[h.id] = { x: h.xNorm * canvasWidth, y: h.yNorm * canvasHeight };
+  });
 
-  const activeLimbs = [rhPos, lhPos, rfPos, lfPos].filter(Boolean) as Joint[];
-  if (activeLimbs.length === 0) return;
+  const limbCoords = {
+    RH: state.RH !== null ? holdCoordsById[state.RH] : null,
+    LH: state.LH !== null ? holdCoordsById[state.LH] : null,
+    RF: state.RF !== null ? holdCoordsById[state.RF] : null,
+    LF: state.LF !== null ? holdCoordsById[state.LF] : null,
+  };
 
-  // Approximate torso position as the average of active holds
-  const avgPos = activeLimbs.reduce((acc, p) => ({x: acc.x + p.x, y: acc.y + p.y}), {x: 0, y: 0});
-  const corePos = { x: avgPos.x / activeLimbs.length, y: avgPos.y / activeLimbs.length - TORSO_HEIGHT / 2 };
+  const contactPoints = Object.values(limbCoords).filter(p => p !== null) as { x: number; y: number }[];
+  
+  let coreX: number, coreY: number;
+  if (contactPoints.length > 0) {
+    const avgX = contactPoints.reduce((sum, p) => sum + p.x, 0) / contactPoints.length;
+    const avgY = contactPoints.reduce((sum, p) => sum + p.y, 0) / contactPoints.length;
+    coreX = avgX;
+    coreY = avgY - climberModel.torsoHeight / 2;
+  } else {
+    coreX = canvasWidth / 2;
+    coreY = canvasHeight / 2;
+  }
 
-  const shoulderL = { x: corePos.x - TORSO_WIDTH / 2, y: corePos.y };
-  const shoulderR = { x: corePos.x + TORSO_WIDTH / 2, y: corePos.y };
-  const hipL = { x: corePos.x - TORSO_WIDTH / 2, y: corePos.y + TORSO_HEIGHT };
-  const hipR = { x: corePos.x + TORSO_WIDTH / 2, y: corePos.y + TORSO_HEIGHT };
+  const joints: JointPositions = {
+    shoulderR: { x: coreX + climberModel.torsoWidth / 2, y: coreY },
+    shoulderL: { x: coreX - climberModel.torsoWidth / 2, y: coreY },
+    hipR: { x: coreX + climberModel.torsoWidth / 2, y: coreY + climberModel.torsoHeight },
+    hipL: { x: coreX - climberModel.torsoWidth / 2, y: coreY + climberModel.torsoHeight },
+  };
+  
+  // A simple IK solver can be embedded or imported here.
+  // For simplicity, we'll just connect the joints to the holds directly.
+  // A full FABRIK implementation would be more robust.
+  if (limbCoords.RH) joints.handR = limbCoords.RH;
+  if (limbCoords.LH) joints.handL = limbCoords.LH;
+  if (limbCoords.RF) joints.footR = limbCoords.RF;
+  if (limbCoords.LF) joints.footL = limbCoords.LF;
+  
+  // Simplified elbow/knee placement (midpoint, bent slightly)
+  if (joints.handR) joints.elbowR = { x: (joints.shoulderR.x + joints.handR.x) / 2, y: (joints.shoulderR.y + joints.handR.y) / 2 + 20 };
+  if (joints.handL) joints.elbowL = { x: (joints.shoulderL.x + joints.handL.x) / 2, y: (joints.shoulderL.y + joints.handL.y) / 2 + 20 };
+  if (joints.footR) joints.kneeR = { x: (joints.hipR.x + joints.footR.x) / 2, y: (joints.hipR.y + joints.footR.y) / 2 - 20 };
+  if (joints.footL) joints.kneeL = { x: (joints.hipL.x + joints.footL.x) / 2, y: (joints.hipL.y + joints.footL.y) / 2 - 20 };
 
-  ctx.strokeStyle = '#FFFF00';
+  return joints;
+}
+
+
+/**
+ * Draws the climber's skeleton on the canvas for a given state.
+ */
+export function drawClimber(
+  ctx: CanvasRenderingContext2D,
+  state: ClimberState,
+  holds: Hold[],
+  canvasWidth: number,
+  canvasHeight: number
+) {
+  const joints = calculateFullBodyPose(state, holds, canvasWidth, canvasHeight);
+
+  ctx.strokeStyle = '#FFFF00'; // Bright yellow for visibility
   ctx.lineWidth = 4;
+  ctx.lineCap = 'round';
 
+  const drawLimb = (p1?: {x:number, y:number}, p2?: {x:number, y:number}, p3?: {x:number, y:number}) => {
+    if (p1 && p2 && p3) {
+      ctx.beginPath();
+      ctx.moveTo(p1.x, p1.y);
+      ctx.lineTo(p2.x, p2.y);
+      ctx.lineTo(p3.x, p3.y);
+      ctx.stroke();
+    }
+  };
+  
+  const drawTorso = (s1: {x:number, y:number}, s2: {x:number, y:number}, h1: {x:number, y:number}, h2: {x:number, y:number}) => {
+      ctx.beginPath();
+      ctx.moveTo(s1.x, s1.y);
+      ctx.lineTo(s2.x, s2.y);
+      ctx.lineTo(h2.x, h2.y);
+      ctx.lineTo(h1.x, h1.y);
+      ctx.closePath();
+      ctx.stroke();
+  }
+
+  // Draw limbs
+  drawLimb(joints.shoulderR, joints.elbowR, joints.handR); // Right Arm
+  drawLimb(joints.shoulderL, joints.elbowL, joints.handL); // Left Arm
+  drawLimb(joints.hipR, joints.kneeR, joints.footR);       // Right Leg
+  drawLimb(joints.hipL, joints.kneeL, joints.footL);       // Left Leg
+  
   // Draw Torso
-  drawLimb(ctx, shoulderL, shoulderR);
-  drawLimb(ctx, shoulderL, hipL);
-  drawLimb(ctx, shoulderR, hipR);
-  drawLimb(ctx, hipL, hipR);
-
-  // Solve and draw limbs
-  if (rhPos) {
-    const elbowR = { x: shoulderR.x, y: shoulderR.y + LIMB_SEGMENT_LENGTHS.upperArm };
-    const armChain = solveIK([shoulderR, elbowR, rhPos], rhPos);
-    armChain.forEach((p, i) => i > 0 && drawLimb(ctx, armChain[i-1], p));
-  }
-  if (lhPos) {
-    const elbowL = { x: shoulderL.x, y: shoulderL.y + LIMB_SEGMENT_LENGTHS.upperArm };
-    const armChain = solveIK([shoulderL, elbowL, lhPos], lhPos);
-    armChain.forEach((p, i) => i > 0 && drawLimb(ctx, armChain[i-1], p));
-  }
-  if (rfPos) {
-    const kneeR = { x: hipR.x, y: hipR.y + LIMB_SEGMENT_LENGTHS.thigh };
-    const legChain = solveIK([hipR, kneeR, rfPos], rfPos);
-    legChain.forEach((p, i) => i > 0 && drawLimb(ctx, legChain[i-1], p));
-  }
-  if (lfPos) {
-    const kneeL = { x: hipL.x, y: hipL.y + LIMB_SEGMENT_LENGTHS.thigh };
-    const legChain = solveIK([hipL, kneeL, lfPos], lfPos);
-    legChain.forEach((p, i) => i > 0 && drawLimb(ctx, legChain[i-1], p));
-  }
-};
+  drawTorso(joints.shoulderR, joints.shoulderL, joints.hipR, joints.hipL)
+}

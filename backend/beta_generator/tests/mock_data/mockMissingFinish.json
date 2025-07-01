@@ -1,0 +1,13 @@
+{
+  "holds": [
+    { "id": 0, "type": "start_hand", "xNorm": 0.15, "yNorm": 0.90 },
+    { "id": 1, "type": "start_hand", "xNorm": 0.25, "yNorm": 0.88 },
+    { "id": 2, "type": "start_foot", "xNorm": 0.10, "yNorm": 0.98 },
+    { "id": 3, "type": "start_foot", "xNorm": 0.30, "yNorm": 0.97 },
+    { "id": 4, "type": "climbing_hold", "xNorm": 0.20, "yNorm": 0.75 },
+    { "id": 5, "type": "climbing_hold", "xNorm": 0.35, "yNorm": 0.60 },
+    { "id": 6, "type": "climbing_hold", "xNorm": 0.15, "yNorm": 0.45 },
+    { "id": 7, "type": "finish_hold", "xNorm": 0.25, "yNorm": 0.20 }
+  ],
+  "start": { "RH": 0, "LH": 1, "RF": 2, "LF": 3 }
+}

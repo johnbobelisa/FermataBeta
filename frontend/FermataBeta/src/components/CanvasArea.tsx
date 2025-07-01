@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import type { Hold, ClimberState, BetaSequence } from '../types';
+import type { Hold, ClimberState, BetaSequence } from '../types/types';
 import { drawClimber } from '../utils/skeleton';
 
 interface Props {
