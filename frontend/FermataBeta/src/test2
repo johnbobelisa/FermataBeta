@@ -4,6 +4,7 @@ from ultralytics import YOLO
 import os
 from pathlib import Path
 import json
+import mediapipe as mp
 
 class CustomHoldDetector:
     def __init__(self):
@@ -147,6 +148,79 @@ class CustomHoldDetector:
             print(f"💾 Result saved: {output_path}")
         
         return result_image, holds
+    
+    def process_video(self, video_path, save_result=True, output_video_path="output_detected.mp4"):
+        mp_pose = mp.solutions.pose
+        mp_drawing = mp.solutions.drawing_utils
+        pose = mp_pose.Pose(static_image_mode=False, model_complexity=1, enable_segmentation=False, min_detection_confidence=0.5)
+
+        cap = cv2.VideoCapture(video_path)
+        frame_num = 0
+        all_holds = []
+
+        # Get video properties for writer
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        width, height = 640, 640  # Since you resize every frame
+
+        # Define the codec and create VideoWriter object
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+        out = cv2.VideoWriter(output_video_path, fourcc, fps, (width, height))
+
+        while cap.isOpened():
+            ret, frame = cap.read()
+            if not ret:
+                break
+            frame = cv2.resize(frame, (width, height))
+
+            # --- POSE ESTIMATION ---
+            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            results = pose.process(frame_rgb)
+            if results.pose_landmarks:
+                mp_drawing.draw_landmarks(
+                    frame, results.pose_landmarks, mp_pose.POSE_CONNECTIONS,
+                    landmark_drawing_spec=mp_drawing.DrawingSpec(color=(0,255,255), thickness=1, circle_radius=1),
+                    connection_drawing_spec=mp_drawing.DrawingSpec(color=(255,0,255), thickness=1, circle_radius=1)
+                )
+            # --- END POSE ESTIMATION ---
+
+            # Run detection on the frame
+            _, holds = self.detect_holds_on_frame(frame)
+            all_holds.append(holds)
+            # Draw only green holds
+            result_image = self.draw_detections(frame.copy(), holds)
+            # Write the frame to the output video
+            out.write(result_image)
+            frame_num += 1
+
+        cap.release()
+        out.release()
+        print(f"🎬 Output video saved as {output_video_path}")
+        return result_image, holds  # Return last frame's result for compatibility
+
+    def detect_holds_on_frame(self, frame, confidence_threshold=0.5):
+        """Detect holds in a single frame (already loaded image)"""
+        results = self.model(frame, conf=confidence_threshold)
+        holds = []
+        for result in results:
+            boxes = result.boxes
+            if boxes is not None:
+                for box in boxes:
+                    x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
+                    confidence = box.conf[0].cpu().numpy()
+                    id = int(box.cls[0].cpu().numpy())
+                    xNorm = int((x1 + x2) / 2)
+                    yNorm = int((y1 + y2) / 2)
+                    width = int(x2 - x1)
+                    height = int(y2 - y1)
+                    type = self.model.names[id]
+                    holds.append({
+                        'id': id,
+                        'type': type,
+                        'center_px': (xNorm, yNorm),
+                        'confidence': float(confidence),
+                        'bbox': (int(x1), int(y1), width, height),
+                    })
+        return frame, holds
 
 
 def is_hold_color(image, bbox, target_color):
@@ -166,30 +240,34 @@ def is_hold_color(image, bbox, target_color):
     return np.count_nonzero(mask) > 0.1 * mask.size  # At least 20% pixels match
 
 
+
+
+
 def main():
     """Test the custom detector"""
     detector = CustomHoldDetector()
     
     # Test images
     test_images = [
-        "frontend/FermataBeta/src/images/2.jpg",  # Your test image
-        "frontend/FermataBeta/src/images/images.jpeg",  # Another test image
-        "frontend/FermataBeta/src/images/image.jpg",
+        # "frontend/FermataBeta/src/images/2.jpg",  # Your test image
+        # "frontend/FermataBeta/src/images/images.jpeg",  # Another test image
+        # "frontend/FermataBeta/src/images/image.jpg",
+        "frontend/FermataBeta/src/images/IMG_5639.mov"
     ]
+    
+    mp_pose = mp.solutions.pose
+    mp_drawing = mp.solutions.drawing_utils
+    pose = mp_pose.Pose(static_image_mode=False, model_complexity=1, enable_segmentation=False, min_detection_confidence=0.5)
     
     for image_path in test_images:
         if os.path.exists(image_path):
             print(f"\n{'='*50}")
-            result_image, holds = detector.process_image(image_path)
+            result_image, holds = detector.process_video(image_path)
 
-            # --- Save holds data as JSON ---
-            # Convert tuples to lists for JSON compatibility
-            holds_json = []
+            # --- Save only green holds as JSON ---
             filtered_holds = []
-
             for hold in holds:
                 if is_hold_color(result_image, hold['bbox'], target_color='green'):
-                    # Convert tuples to lists for JSON compatibility
                     hold_copy = hold.copy()
                     if isinstance(hold_copy['center_px'], tuple):
                         hold_copy['center_px'] = list(hold_copy['center_px'])
@@ -198,10 +276,10 @@ def main():
                     filtered_holds.append(hold_copy)
 
             # Write to file (one file per image)
-            json_filename = os.path.splitext(os.path.basename(image_path))[0] + "_holds.json"
+            json_filename = os.path.splitext(os.path.basename(image_path))[0] + "_green_holds.json"
             with open(json_filename, "w") as f:
                 json.dump(filtered_holds, f, indent=2)
-            print(f"💾 Holds data saved to {json_filename}")
+            print(f"💾 Green holds data saved to {json_filename}")
             # --- End JSON save ---
 
             if result_image is not None:
